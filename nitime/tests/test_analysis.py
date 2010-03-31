@@ -6,6 +6,64 @@ import nitime.analysis as nta
 import nose.tools as nt
 import decotest
 
+def test_SpectralAnalyzer():
+
+    Fs = np.pi
+    t = np.arange(1024)
+    x = np.sin(10*t) + np.random.rand(t.shape[-1])
+    y = np.sin(10*t) + np.random.rand(t.shape[-1])
+
+    T = ts.UniformTimeSeries(np.vstack([x,y]),sampling_rate=Fs)
+
+    C = nta.SpectralAnalyzer(T)
+
+    f,c = C()
+
+    npt.assert_equal(f.shape,(33,)) #This is the setting for this analyzer
+                                    #(window-length of 64)
+    npt.assert_equal(c.shape,(2,2,33))
+
+    f,c = C.spectrum_fourier
+
+    npt.assert_equal(f.shape,(t.shape[0]/2+1,))
+    npt.assert_equal(c.shape,(2,t.shape[0]/2+1))
+
+    f,c = C.spectrum_multi_taper
+
+    npt.assert_equal(f.shape,(t.shape[0]/2+1,))
+    npt.assert_equal(c.shape,(2,2,t.shape[0]/2+1))
+
+def test_CoherenceAnalyzer():
+    Fs = np.pi
+    t = np.arange(10)
+    x = np.sin(10*t) + np.random.rand(t.shape[-1])
+    y = np.sin(10*t) + np.random.rand(t.shape[-1])
+    T = ts.UniformTimeSeries(np.vstack([x,y]),sampling_rate=Fs)
+    C = nta.CoherenceAnalyzer(T)
+
+    npt.assert_equal(C().shape,(2,2,33)) #Default mlab_method
+    #Coherence symmetry:
+    npt.assert_equal(C.coherence[0,1],C.coherence[1,0])
+    #Phase/delay asymmetry:
+    npt.assert_equal(C.phase[0,1],-1*C.phase[1,0])
+    npt.assert_equal(C.delay[0,1][1:],-1*C.delay[1,0][1:]) #The very first one
+                                        #is a nan
+
+    #Calculation of the spectrum is the same as in the default spectral analyzer:
+    S = nta.SpectralAnalyzer(T)
+    npt.assert_equal(S(),(C.frequencies,C.spectrum))
+
+def test_SparseCoherenceAnalyzer():
+    Fs = np.pi
+    t = np.arange(10)
+    x = np.sin(10*t) + np.random.rand(t.shape[-1])
+    y = np.sin(10*t) + np.random.rand(t.shape[-1])
+    T = ts.UniformTimeSeries(np.vstack([x,y]),sampling_rate=Fs)
+    C = nta.SparseCoherenceAnalyzer(T,ij=((0,1),(1,0)))
+
+    #Coherence symmetry:
+    npt.assert_equal(np.abs(C[0,1]),np.abs(C[1,0]))
+
 def test_CorrelationAnalyzer():
 
     Fs = np.pi
@@ -18,10 +76,10 @@ def test_CorrelationAnalyzer():
     C = nta.CorrelationAnalyzer(T)
 
     #Test the symmetry: correlation(x,y)==correlation(y,x) 
-    npt.assert_equal(C.correlation[0,1],C.correlation[1,0])
+    npt.assert_equal(C[0,1],C[1,0])
     #Test the self-sameness: correlation(x,x)==1
-    npt.assert_equal(C.correlation[0,0],1)
-    npt.assert_equal(C.correlation[1,1],1)
+    npt.assert_equal(C[0,0],1)
+    npt.assert_equal(C[1,1],1)
 
     #Test the cross-correlation:
     #First the symmetry:
@@ -30,7 +88,7 @@ def test_CorrelationAnalyzer():
     #Test the normalized cross-correlation
     #The cross-correlation should be equal to the correlation at time-lag 0
     npt.assert_equal(C.xcorr_norm.data[0,1,C.xcorr_norm.time==0]
-                            ,C.correlation[0,1])
+                            ,C[0,1])
 
     #And the auto-correlation should be equal to 1 at 0 time-lag:
     npt.assert_equal(C.xcorr_norm.data[0,0,C.xcorr_norm.time==0],1)
@@ -44,10 +102,9 @@ def test_CorrelationAnalyzer():
     T = ts.UniformTimeSeries(np.vstack([x,y]),sampling_rate=Fs)
 
     C = nta.CorrelationAnalyzer(T)
-
     
     npt.assert_equal(C.xcorr_norm.data[0,1,C.xcorr_norm.time==0]
-                            ,C.correlation[0,1])
+                            ,C[0,1])
 
 def test_EventRelatedAnalyzer():
 
@@ -77,17 +134,6 @@ def test_EventRelatedAnalyzer():
     npt.assert_almost_equal(FIR.data[0],signal[:FIR.data.shape[-1]],3)
     npt.assert_almost_equal(FIR.data[1],-1*signal[:FIR.data.shape[-1]],3)
 
-def test_CoherenceAnalyzer():
-
-    Fs = np.pi
-    t = np.arange(1024)
-    x = np.sin(10*t) + np.random.rand(t.shape[-1])
-    y = np.sin(10*t) + np.random.rand(t.shape[-1])
-
-    T = ts.UniformTimeSeries(np.vstack([x,y]),sampling_rate=Fs)
-
-    C = nta.CoherenceAnalyzer(T)
-
 def test_HilbertAnalyzer():
     """Testing the HilbertAnalyzer (analytic signal)"""
     pi = np.pi
@@ -104,11 +150,11 @@ def test_HilbertAnalyzer():
 
     H = nta.HilbertAnalyzer(T)
 
-    h_abs = H.magnitude.data
+    h_abs = H.amplitude.data
     h_angle = H.phase.data
     h_real = H.real.data
     #The real part should be equal to the original signals:
-    npt.assert_almost_equal(h_real,H.data)
+    npt.assert_almost_equal(h_real,T.data)
     #The absolute value should be one everywhere, for this input:
     npt.assert_almost_equal(h_abs,np.ones(T.data.shape))
     #For the 'slow' sine - the phase should go from -pi/2 to pi/2 in the first
@@ -138,3 +184,15 @@ def test_FilterAnalyzer():
     #
     f_fast = nta.FilterAnalyzer(time_series,lb=0.6)
     npt.assert_equal(f_fast.filtered_fourier.data,fast)
+
+def test_MorletWaveletAnalyzer():
+    """Testing the MorletWaveletAnalyzer """
+    time_series = ts.UniformTimeSeries(data=np.random.rand(100),sampling_rate=100)
+
+    W = nta.MorletWaveletAnalyzer(time_series,freqs=20)
+    WL = nta.MorletWaveletAnalyzer(time_series,freqs=20,log_morlet=True)
+    H = nta.HilbertAnalyzer(W.real)
+    HL = nta.HilbertAnalyzer(WL.real)
+
+    npt.assert_almost_equal(np.sin(H.phase.data[10:-10]),np.sin(W.phase.data[10:-10]),decimal=0)
+    npt.assert_almost_equal(np.sin(HL.phase.data[10:-10]),np.sin(WL.phase.data[10:-10]),decimal=0)

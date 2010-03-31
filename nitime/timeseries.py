@@ -11,16 +11,6 @@ have to that library.
 Over time, it is OK to add increasingly functionally rich classes, but only
 after their design is well proven in real-world use.
 
-Authors
--------
-- Ariel Rokem <arokem@berkeley.edu>, 
-- Fernando Perez <Fernando.Perez@berkeley.edu>.
-- Mike Trumpis <mtrumpis@gmail.com>
-- Paul Ivanov <pivanov@berkeley.edu>
-- Kilian Koepsell <kilian@berkeley.edu>
-- Tim Blanche <tjb@berkeley.edu>
-- Drew Fegen <dfegen@gmail.com> 
-
 """
 #-----------------------------------------------------------------------------
 # Public interface
@@ -279,6 +269,9 @@ class UniformTime(np.ndarray,TimeInterface):
         tspec = tuple(x is not None for x in
                       [sampling_interval,sampling_rate,length,duration])
 
+        # Used in converting tspecs to human readable form
+        tspec_arg_names = ['sampling_interval','sampling_rate','length','duration']
+
         # The valid configurations 
         valid_tspecs=[
             # interval, length:
@@ -295,46 +288,42 @@ class UniformTime(np.ndarray,TimeInterface):
         
         if isinstance(data,UniformTime):
             # Assuming data was given, some other tspecs become valid:
-            valid_w_data=[
-                # nothing:
-                (False,False,False,False),
-                # interval:
-                (True,False,False,False),
-                # rate
-                (False,True,False,False),
-                # length:
-                (False,False,True,False),
-                # duration:
-                (False,False,False,True)
-                ]        
+            tspecs_w_data=dict(
+                    nothing=(False,False,False,False),
+                    sampling_interval= (True,False,False,False),
+                    sampling_rate= (False,True,False,False),
+                    length= (False,False,True,False),
+                    duration=(False,False,False,True))
+            # preserve the order of the keys
+            valid_tspecs.append( tspecs_w_data['nothing'])
+            for name in tspec_arg_names:
+                valid_tspecs.append( tspecs_w_data[name])
 
-        if (tspec not in valid_tspecs and
-            not(isinstance(data,UniformTime) and tspec in valid_w_data)):
+        if (tspec not in valid_tspecs):
             l = ['sampling_interval','sampling_rate','length','duration']
-            args = [arg for t,arg in zip(tspec,l) if t]
-            raise ValueError("Invalid time specification," +
-            "You provided: %s see docstring." %(" ".join(args)))
-            #XXX Needs more engineering in here in order to tell the user not
-            # only what they provided, but also what more they should provide in
-            # order for this to be valid 
+            #args = [arg for t,arg in zip(tspec,l) if t]
+            raise ValueError("Invalid time specification.\n" +
+                "You provided: %s \n"
+                "%s \nsee docstring for more info." 
+                %(str_tspec(tspec,tspec_arg_names), str_valid_tspecs(valid_tspecs,tspec_arg_names)))
             
         if isinstance(data,UniformTime):
             # Get attributes from the UniformTime object and transfer those over:
-            if tspec==valid_w_data[0]:
+            if tspec==tspecs_w_data['nothing']:
                 sampling_rate=data.sampling_rate
                 duration = data.duration
-            elif tspec==valid_w_data[1]:
+            elif tspec==tspecs_w_data['sampling_interval']:
                 duration==data.duration
-            elif tspec==valid_w_data[2]:
+            elif tspec==tspecs_w_data['sampling_rate']:
                 if isinstance(sampling_rate,Frequency):
                     sampling_interval=sampling_rate.to_period()
                 else:
                     sampling_interval = 1.0/sampling_rate
                 duration=data.duration
-            elif tspec==valid_w_data[3]:
+            elif tspec==tspecs_w_data['length']:
                 duration=length*data.sampling_interval
                 sampling_rate=data.sampling_rate
-            elif tspec==valid_w_data[4]:
+            elif tspec==tspecs_w_data['duration']:
                 sampling_rate=data.sampling_rate
             if time_unit is None:
                 # If the user didn't ask to change the time-unit, use the
@@ -555,14 +544,13 @@ class Frequency(float):
         return np.int64((1/self)*scale_factor)
         
 ##Time-series: 
-class TimeSeriesInterface(object):
+class TimeSeriesInterface(TimeInterface):
     """The minimally agreed upon interface for all time series.
 
     This should be thought of as an abstract base class.
     """
     time = None
     data = None
-    time_unit = None
     metadata = None
     
 
@@ -600,6 +588,14 @@ class TimeSeriesBase(object):
         npoints = self.data.shape[-1]
         if npoints != len(self.time):
             raise ValueError("mismatch of time and data dimensions")
+
+
+    def __getitem__(self,key):
+        """use fancy time-indexing (at() method).""" 
+        if isinstance(key,TimeInterface):
+            return self.at(key)
+        else:
+            return self.data[key]
 
         
 class UniformTimeSeries(TimeSeriesBase):
@@ -669,8 +665,9 @@ class UniformTimeSeries(TimeSeriesBase):
     #with a UniformTime object and data, so that you don't need to deal with
     #the constructor itself:  
     @staticmethod
-    def from_time_and_data():
-        pass
+    def from_time_and_data(time, data):
+        return UniformTimeSeries.__init__(data, time=time)
+        
     
     
     def __init__(self, data, t0=None, sampling_interval=None,
@@ -750,6 +747,8 @@ class UniformTimeSeries(TimeSeriesBase):
             tspec = tuple(x is not None for x in
                       [sampling_interval,sampling_rate,duration])
 
+            tspec_arg_names = ["sampling_interval", "sampling_rate", "duration"] 
+
             #The valid configurations 
             valid_tspecs=[
                       #interval,length:
@@ -765,7 +764,10 @@ class UniformTimeSeries(TimeSeriesBase):
                       ]
 
             if tspec not in valid_tspecs:
-                raise ValueError("Invalid time specification, see docstring.")
+                raise ValueError("Invalid time specification. \n"
+                        "You provided: %s\n %s see docstring for more info." % (
+                            str_tspec(tspec, tspec_arg_names),
+                            str_valid_tspecs(valid_tspecs,tspec_arg_names)))
         
         #Calculate the sampling_interval or sampling_rate from each other and
         #assign t0, if it is not already assigned:
@@ -854,6 +856,24 @@ class UniformTimeSeries(TimeSeriesBase):
         self.t0 = TimeArray(t0,time_unit=self.time_unit)
         self.sampling_rate = sampling_rate
         self.duration = TimeArray(duration,time_unit=self.time_unit)
+
+
+def str_tspec(tspec, arg_names):
+    """ Turn a single tspec into human readable form"""
+    # an all "False" will convert to an empty string unless we do the following
+    # where we create an all False tuple of the appropriate length
+    if tspec==tuple([False]*len(arg_names)):
+        return "(nothing)"
+    return ", ".join([arg for t,arg in zip(tspec,arg_names) if t])
+
+def str_valid_tspecs(valid_tspecs, arg_names):
+    """Given a set of valid_tspecs, return a string that turns them into
+    human-readable form"""
+    vargs = []
+    for tsp in valid_tspecs: 
+        vargs.append(str_tspec(tsp, arg_names))
+    return "\n Valid time specifications are:\n\t%s" %("\n\t".join(vargs))
+
 
 class NonUniformTimeSeries(TimeSeriesBase):
     """Represent data collected at arbitrary time points.

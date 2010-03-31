@@ -935,7 +935,7 @@ def coherence_partial(time_series,r,csd_method=None):
         for j in xrange(i,time_series.shape[0]):
             f,fxx,frr,frx = get_spectra_bi(time_series[i],r,csd_method)
             f,fyy,frr,fry = get_spectra_bi(time_series[j],r,csd_method)
-            coherence_partial_calculate(fxy[i][j],fxy[i][i],fxy[j][j],
+            c[i,j] = coherence_partial_calculate(fxy[i][j],fxy[i][i],fxy[j][j],
                                         frx,fry,frr)
 
     idx = ut.tril_indices(time_series.shape[0],-1)
@@ -992,8 +992,8 @@ def coherence_partial_calculate(fxy,fxx,fyy,fxr,fry,frr):
     Rry = coh(fry,fyy,frr)
     Rxy = coh(fxy,fxx,fyy)
 
-    return (( Rxy - (Rxr*Rry) ) /
-            np.sqrt( (1-Rxr*Rxr.conjugate()) * (1-Rry*Rry.conjugate()) ) )
+    return (( (np.abs(Rxy-Rxr*Rry))**2 ) /
+           ( (1-((np.abs(Rxr))**2)) * (1-((np.abs(Rry))**2)) ) )
 
 def coherence_partial_bavg(x,y,r,csd_method=None,lb=0,ub=None):
     r""" Band-averaged partial coherence
@@ -1446,26 +1446,28 @@ def event_related_zscored(tseries,events,Tbefore, Tafter, Fs=1):
              / stdSurr )
 
 
-def gamma_hrf(tau,n,delta,duration,Fs=1.0,A=1):
+def gamma_hrf(duration,A=1.,tau=1.08,n=3,delta=2.05,Fs=1.0):
 
     r"""A gamma function hrf model, with two parameters, based on [Boynton1996]_
 
 
     Parameters
     ----------
+    
+    duration: float, the length of the HRF (in the inverse units of the sampling
+    rate)
 
-    tau: float The time constant of the gamma function 
+    A: float, a scaling factor, sets the max of the function, defaults to 1
 
-    n: int, the phase delay of the gamma function
+    tau: float The time constant of the gamma function, defaults to 1.08 
+
+    n: int, the phase delay of the gamma function, defaults to 3
 
     delta: a pure delay, allowing for an additional delay from the onset of the
-    time-series to the beginning of the gamma hrf
-
-    length: float, the length of the HRF (in units of sampling intervals)
-
-    Fs: float, the sampling rate
-
-    A: float, a scaling factor
+    time-series to the beginning of the gamma hrf, defaults to 2.05
+    
+    Fs: float, the sampling rate, defaults to 1.0
+   
 
     Returns
     -------
@@ -1486,6 +1488,12 @@ def gamma_hrf(tau,n,delta,duration,Fs=1.0,A=1):
        Resonance Imaging in Human V1. J Neurosci 16: 4207-4221 
     
     """
+    if type(n) is not int:
+        print ('gamma_hrf received unusual input, converting n from %s to %i'
+               %(str(n),int(n)))
+
+        n=int(n)
+               
     sampling_interval = 1/float(Fs)
 
     #Prevent negative delta values:
@@ -1505,38 +1513,28 @@ def gamma_hrf(tau,n,delta,duration,Fs=1.0,A=1):
     h = (t_tau**(n-1) * np.exp(-1*(t_tau)) /
          (tau * factorial(n-1) ) )
 
-    return A*h
+    return A*h/max(h)
 
-def polonsky_hrf(A, tau1, f1, tau2, f2,t_max,Fs=1.0):
+def polonsky_hrf(A, B, tau1, f1, tau2, f2,t_max,Fs=1.0):
     r""" HRF based on [Polonsky2000]_
 
     .. math::
 
-       H(t) = exp(-t/\tau1) \cdot sin(2\pi \cdot f1 \cdot t) -a\cdot exp(-t/\tau2)*sin(2\pi\cdotf2\cdot t)
+       H(t) = exp(\frac{-t}{\tau_1}) sin(2\cdot\pi f_1 \cdot t) -a\cdot exp(-\frac{t}{\tau_2})*sin(2\pi f_2 t)
 
        .. [Polonsky2000] Alex Polonsky, Randolph Blake, Jochen Braun and David
        J. Heeger. Neuronal activity in human primary visual cortex correlates
        with perception during binocular rivalry. Nature Neuroscience 3: 1153-1159
 
     """
-
     sampling_interval = 1/float(Fs)
 
-    #Prevent negative delta values:
-    if delta<0:
-        raise ValueError('in gamma_hrf, delta cannot be smaller than 0')
+    t = np.arange(0,t_max,sampling_interval)
 
-    #Prevent cases in which the delta is larger than the entire hrf:
-    if (delta*sampling_interval)>t_max:
-        raise ValueError('in gamma_hrf, delta cannot be larger than t_max')
-    
-   
-    t = np.arange(0,t_max-(delta*sampling_interval),sampling_interval)
+    h = (np.exp(-t/tau1) * np.sin(2*np.pi * f1 * t) -
+            (B * np.exp(-t/tau2) * np.sin(2 * np.pi * f2 * t)))
 
-    return (np.exp(-t/tau1) * np.sin( 2 * np.pi * f1 * t) -
-            A * np.exp(-t/tau2) * np.sin(2 * pi * f2 * t))
-
-
+    return A*h/max(h) 
 #-----------------------------------------------------------------------------
 # Spectral estimation
 #-----------------------------------------------------------------------------
@@ -2597,7 +2595,96 @@ def autocov(x):
 
     return autocov
         
-        
-    
-    
-    
+#TODO:
+# * Write tests for various morlet wavelets
+# * Possibly write 'full morlet wavelet' function
+def wfmorlet_fft(f0,sd,samplingrate,ns=5,nt=None):
+    """
+    returns a complex morlet wavelet in the frequency domain
+
+    :Parameters:
+        f0 : center frequency
+        sd : standard deviation of center frequency
+        sampling_rate : samplingrate
+        ns : window length in number of stanard deviations
+        nt : window length in number of sample points
+    """
+    if nt==None:
+        st = 1./(2.*np.pi*sd)
+        nt = 2*int(ns*st*sampling_rate)+1
+    f = np.fft.fftfreq(nt,1./sampling_rate)
+    wf = 2*np.exp(-(f-f0)**2/(2*sd**2))*np.sqrt(sampling_rate/(np.sqrt(np.pi)*sd))
+    wf[f<0] = 0
+    wf[f==0] /= 2
+    return wf
+
+def wmorlet(f0,sd,sampling_rate,ns=5,normed='area'):
+    """
+    returns a complex morlet wavelet in the time domain
+
+    :Parameters:
+        f0 : center frequency
+        sd : standard deviation of frequency
+        sampling_rate : samplingrate
+        ns : window length in number of stanard deviations
+    """
+    st = 1./(2.*np.pi*sd)
+    w_sz = float(int(ns*st*sampling_rate)) # half time window size
+    t = np.arange(-w_sz,w_sz+1,dtype=float)/sampling_rate
+    if normed == 'area':
+        w = np.exp(-t**2/(2.*st**2))*np.exp(
+            2j*np.pi*f0*t)/np.sqrt(np.sqrt(np.pi)*st*sampling_rate)
+    elif normed == 'max':
+        w = np.exp(-t**2/(2.*st**2))*np.exp(
+            2j*np.pi*f0*t)*2*sd*np.sqrt(2*np.pi)/sampling_rate
+    else:
+        assert 0, 'unknown norm %s'%normed
+    return w
+
+def wlogmorlet_fft(f0,sd,sampling_rate,ns=5,nt=None):
+    """
+    returns a complex log morlet wavelet in the frequency domain
+
+    :Parameters:
+        f0 : center frequency
+        sd : standard deviation
+        sampling_rate : samplingrate
+        ns : window length in number of stanard deviations
+        nt : window length in number of sample points
+    """
+    if nt==None:
+        st = 1./(2.*np.pi*sd)
+        nt = 2*int(ns*st*sampling_rate)+1
+    f = np.fft.fftfreq(nt,1./sampling_rate)
+
+    sfl = np.log(1+1.*sd/f0)
+    wf = 2*np.exp(-(np.log(f)-np.log(f0))**2/(2*sfl**2))*np.sqrt(sampling_rate/(np.sqrt(np.pi)*sd))
+    wf[f<0] = 0
+    wf[f==0] /= 2
+    return wf
+
+def wlogmorlet(f0,sd,sampling_rate,ns=5,normed='area'):
+    """
+    returns a complex log morlet wavelet in the time domain
+
+    :Parameters:
+        f0 : center frequency
+        sd : standard deviation of frequency
+        sampling_rate : samplingrate
+        ns : window length in number of stanard deviations
+    """
+    st = 1./(2.*np.pi*sd)
+    w_sz = int(ns*st*sampling_rate) # half time window size
+    wf = wlogmorlet_fft(f0,sd,sampling_rate=sampling_rate,nt=2*w_sz+1)
+    w = np.fft.fftshift(np.fft.ifft(wf))
+    if normed == 'area':
+        w /= w.real.sum()
+    elif normed == 'max':
+        w /= w.real.max()
+    elif normed == 'energy':
+        w /= np.sqrt((w**2).sum())
+    else:
+        assert 0, 'unknown norm %s'%normed
+    return w
+
+
