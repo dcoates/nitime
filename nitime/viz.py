@@ -19,7 +19,7 @@ try:
     import networkx as nx
 #If not, throw an error and get on with business:
 except ImportError:
-    print "Networkx is not available. Some visualization tools might not work"
+    print "Networkx is not available. Some visualization tools might not work" \
     "\n To download networkx: http://networkx.lanl.gov/"
 
 def plot_tseries(time_series,fig=None,axis=0,
