@@ -27,6 +27,7 @@ def maxi(seq):
     """Return the value and position of the first maximum item of a sequence."""
     return max((x,i) for i,x in enumerate(seq))
 
+
 def gaussian_func( (mu, sigma, A, C), x):
 	return A*np.exp( - ((x-mu) **2) / (2*sigma**2) ) + C
   
@@ -41,6 +42,18 @@ def gaussian_init( data ):
 		
 	params = (mu_guess, sigma_guess, A_guess, 0)
 	return params
+
+# XXX 
+def gamma_guess( data ):
+	(maxv,maxvi) = maxi( data )
+
+	datalen = len(data)
+	mu_guess = maxi(data)[1]/float(datalen)
+	A_guess = maxi(data)[0]
+	
+	params = (mu_guess, sigma_guess, A_guess, 0)
+	return params
+
 
 class fit_objective: pass
 
