@@ -45,14 +45,37 @@ def gaussian_init( data ):
 
 # XXX 
 def gamma_guess( data ):
-	(maxv,maxvi) = maxi( data )
+    """This function guesses the starting parameters for a gamma_hrf
 
-	datalen = len(data)
-	mu_guess = maxi(data)[1]/float(datalen)
-	A_guess = maxi(data)[0]
-	
-	params = (mu_guess, sigma_guess, A_guess, 0)
-	return params
+    Parameters
+    ----------
+
+    data: a nitime UniformTimeSeries object
+
+    Returns
+    -------
+
+    params: a tuple with (A_guess, tau_guess, n_guess,
+    delta_guess,y_offset_guess) which are the guesses for a starting point for
+    optimization based on the data.
+    
+    """
+    defaults ={}
+    spec = getargspec(tsa.gamma_hrf)
+    for i in range(len(spec.defaults)):
+        defaults.update({spec.args[-i]:spec.defaults[-i]})
+
+    (maxv,maxvi) = maxi(data)
+    A_guess = maxi(data)[0]
+    delta_guess = -1*data.t0 + defaults['delta']
+    datalen = len(data)
+    n_guess = defaults['n']
+    tau_guess = (maxi(data)[1]*data.sampling_interval)/float(2)
+    y_offset_guess = np.mean(data.data[...,: np.abs(data.t0)]
+
+    params = (A_guess, tau_guess,  n_guess, delta_guess, y_offset_guess)
+
+    return params
 
 
 class fit_objective: pass
